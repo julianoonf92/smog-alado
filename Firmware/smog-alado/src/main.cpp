@@ -46,9 +46,9 @@ double adcTimer = 0;
 double heaterTimer = 0;
 double loopTimer = 0;
 
-double kp = 4.89;  // Initial values, can be adjusted as needed
-double ki = 0.05;
-double kd = 116.85;
+double kp = 1;  // Initial values, can be adjusted as needed
+double ki = 0.01;
+double kd = 1;
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Adafruit_ADS1115 ads;
@@ -160,7 +160,7 @@ void autoTunePID() {
   const int tuningDuration = 1200000;  // 10 minutes in milliseconds
   unsigned long startTime = millis();
   double maxTemperature = 0;
-  double minTemperature = tempMax;
+  double minTemperature = tempGoal;
 
   // Variables for PID control
   double setpoint = tempGoal;
@@ -206,7 +206,8 @@ void autoTunePID() {
       // Convert the PID output to a PWM value
       int pwmValue = static_cast<int>(output);
 		  if (pwmValue > ANALOG_RANGE) pwmValue = ANALOG_RANGE;
-    //if (error > 30) pwmValue = ANALOG_RANGE;
+      if (heaterTemperature > (tempGoal + 5)) pwmValue = 0;
+      //if (error > 30) pwmValue = ANALOG_RANGE;
 	  Serial.print(">PID Power output: ");
     Serial.println(pwmValue);
       analogWrite(heater, pwmValue);
@@ -238,7 +239,7 @@ void autoTunePID() {
   }
 
   // Calculate Ku and Pu for Ziegler-Nichols method
-  double Ku = 4 * (2 * tempMax) / (maxTemperature - minTemperature);
+  double Ku = 4 * (2 * tempGoal) / (maxTemperature - minTemperature);
   double Pu = (millis() - startTime) / 1000.0 / (2 * 3.14);  // convert to seconds
 
   // Use Ziegler-Nichols ultimate gain and oscillation period to set PID parameters
