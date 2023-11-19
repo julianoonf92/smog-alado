@@ -1,10 +1,13 @@
 #include <Arduino.h>
-#include <ESP8266WiFi.h>
 #include <Wire.h>
 #include <SPI.h>
 #include <Adafruit_ADS1X15.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
 
 #define ledPin 2
 #define SDA 4
@@ -20,42 +23,54 @@
 #define tempMax 190
 #define ANALOG_RANGE 1024
 
-// put function declarations here:
-double resCalc ();
-double steinhart (double termistor);
-void runHeater (int preset);
-int buttonPress (int button);
+#ifndef STASSID
+#define STASSID "your-ssid" //"your-ssid"
+#define STAPSK "your-password" //"your-password"
+#endif
 
+const char* ssid = STASSID;
+const char* password = STAPSK;
+
+//Heater control
 double thermistor = 500;
 double heaterTemperature = 0;
 double tempGoal = 180;
 double powerPercent = 0;
+int power = 0;
+int preset = 3;
+bool debouncedButton = false;
+bool state = false;
 
+// PID calculation parameters
 double error = 0;
 double prevError = 0;
 double integral = 0;
 double proportional = 0;
 double derivative = 0;
 
-int power = 0;
-int preset = 3;
-bool debouncedButton = false;
-bool state = false;
+// Initial PID values, can be adjusted as needed
+double kp = 6.54;
+double ki = 0.83;
+double kd = 156.13;
+
+//ADC parameters
 uint16_t adcRaw = 1000;
 uint16_t adcFiltered = 1000;
-
 double adcTimer = 0;
 double heaterTimer = 0;
 double loopTimer = 0;
 
-double kp = 6.54;  // Initial values, can be adjusted as needed
-double ki = 0.83;
-double kd = 156.13;
+// put function declarations here:
+void updateDisplay();
+void autoTunePID();
+void runHeater (int preset);
+double resCalc ();
+double steinhart (double termistor);
+int buttonPress (int button);
+
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Adafruit_ADS1115 ads;
-
-void updateDisplay();
 
 void setup() {
   pinMode(ledPin, OUTPUT);
@@ -63,14 +78,65 @@ void setup() {
   pinMode(heater, OUTPUT);
   digitalWrite(ledPin, LOW); //builtin LED set to ON on boot
   digitalWrite(heater, LOW);  //heater set to OFF on boot
+  analogWriteRange(ANALOG_RANGE);
+
+  Serial.println("Booting");
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
+    Serial.println("Connection Failed! Rebooting...");
+    delay(5000);
+    ESP.restart();
+  }
+
+  // Initialize OTA
+  ArduinoOTA.onStart([]() {
+    String type;
+    if (ArduinoOTA.getCommand() == U_FLASH) {
+      type = "sketch";
+    } else {  // U_FS
+      type = "filesystem";
+    }
+
+    // NOTE: if updating FS this would be the place to unmount FS using FS.end()
+    Serial.println("Start updating " + type);
+  });
+
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\nEnd");
+  });
+
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) {
+      Serial.println("Auth Failed");
+    } else if (error == OTA_BEGIN_ERROR) {
+      Serial.println("Begin Failed");
+    } else if (error == OTA_CONNECT_ERROR) {
+      Serial.println("Connect Failed");
+    } else if (error == OTA_RECEIVE_ERROR) {
+      Serial.println("Receive Failed");
+    } else if (error == OTA_END_ERROR) {
+      Serial.println("End Failed");
+    }
+  });
+
+  ArduinoOTA.begin();
+
+  Serial.println("Ready");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  WiFi.setSleepMode(WIFI_LIGHT_SLEEP, 10);
 
   if (!(ads.begin())){
     Serial.println("Failed to initialize ADS.");
   }
   ads.setGain(GAIN_ONE);
-  Serial.begin(115200);
-  WiFi.mode(WIFI_OFF);
-  analogWriteRange(ANALOG_RANGE);
 
   if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
     Serial.println("SSD1306 allocation failed");
@@ -86,6 +152,8 @@ void setup() {
 }
 
 void loop() {
+  ArduinoOTA.handle();
+  
   if ((millis()-adcTimer) > 200){
     adcTimer = millis();
     thermistor = resCalc();
