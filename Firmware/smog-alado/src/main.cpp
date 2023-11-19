@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <SPI.h>
+#include <EEPROM.h>
 #include <Adafruit_ADS1X15.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -8,6 +9,9 @@
 #include <ESP8266mDNS.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
+#include <DNSServer.h>
+#include <ESP8266WebServer.h>
+#include <WiFiManager.h>
 
 #define ledPin 2
 #define SDA 4
@@ -23,13 +27,11 @@
 #define tempMax 190
 #define ANALOG_RANGE 1024
 
-#ifndef STASSID
-#define STASSID "your-ssid" //"your-ssid"
-#define STAPSK "your-password" //"your-password"
-#endif
+#define EEPROM_WIFI_SSID_START 0
+#define EEPROM_WIFI_PASS_START 64
 
-const char* ssid = STASSID;
-const char* password = STAPSK;
+char customWifiSSID[32];
+char customWifiPass[32];
 
 //Heater control
 double thermistor = 500;
@@ -72,7 +74,14 @@ int buttonPress (int button);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Adafruit_ADS1115 ads;
 
+void configModeCallback(WiFiManager *myWiFiManager) {
+  Serial.println("Entered config mode");
+  Serial.println(WiFi.softAPIP());
+  Serial.println(myWiFiManager->getConfigPortalSSID());
+}
+
 void setup() {
+  Serial.begin(115200);
   pinMode(ledPin, OUTPUT);
   pinMode(buttonPin, INPUT);
   pinMode(heater, OUTPUT);
@@ -80,23 +89,48 @@ void setup() {
   digitalWrite(heater, LOW);  //heater set to OFF on boot
   analogWriteRange(ANALOG_RANGE);
 
-  Serial.println("Booting");
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
-    Serial.println("Connection Failed! Rebooting...");
+  // Set up WiFiManager
+  WiFiManager wifiManager;
+  wifiManager.setAPCallback(configModeCallback);
+
+  // Try to load WiFi credentials from EEPROM
+  EEPROM.begin(512); // Initialize EEPROM with 512 bytes
+  EEPROM.get(EEPROM_WIFI_SSID_START, customWifiSSID);
+  EEPROM.get(EEPROM_WIFI_PASS_START, customWifiPass);
+
+  // Set the custom parameters for WiFiManager
+  WiFiManagerParameter customSSID("SSID", "WiFi SSID", customWifiSSID, 32);
+  WiFiManagerParameter customPass("password", "WiFi Password", customWifiPass, 32);
+
+  wifiManager.addParameter(&customSSID);
+  wifiManager.addParameter(&customPass);
+
+  // Try to connect to WiFi, or start a configuration portal if connection fails
+  if (!wifiManager.autoConnect("AutoConnectAP")) {
+    Serial.println("Failed to connect and hit timeout");
+    delay(3000);
+    // Reset and try again, or maybe put it to deep sleep
+    ESP.reset();
     delay(5000);
-    ESP.restart();
   }
+
+  // Save WiFi credentials to EEPROM
+  strncpy(customWifiSSID, customSSID.getValue(), 32);
+  strncpy(customWifiPass, customPass.getValue(), 32);
+  EEPROM.put(EEPROM_WIFI_SSID_START, customWifiSSID);
+  EEPROM.put(EEPROM_WIFI_PASS_START, customWifiPass);
+  EEPROM.commit();
+
+  // If you get here, you have connected to the WiFi
+  Serial.println("Connected to WiFi");
 
   // Initialize OTA
   ArduinoOTA.onStart([]() {
     String type;
-    if (ArduinoOTA.getCommand() == U_FLASH) {
+    if (ArduinoOTA.getCommand() == U_FLASH)
       type = "sketch";
-    } else {  // U_FS
+    else // U_FS
       type = "filesystem";
-    }
 
     // NOTE: if updating FS this would be the place to unmount FS using FS.end()
     Serial.println("Start updating " + type);
@@ -112,26 +146,14 @@ void setup() {
 
   ArduinoOTA.onError([](ota_error_t error) {
     Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) {
-      Serial.println("Auth Failed");
-    } else if (error == OTA_BEGIN_ERROR) {
-      Serial.println("Begin Failed");
-    } else if (error == OTA_CONNECT_ERROR) {
-      Serial.println("Connect Failed");
-    } else if (error == OTA_RECEIVE_ERROR) {
-      Serial.println("Receive Failed");
-    } else if (error == OTA_END_ERROR) {
-      Serial.println("End Failed");
-    }
+    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR) Serial.println("End Failed");
   });
 
   ArduinoOTA.begin();
-
-  Serial.println("Ready");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-
-  WiFi.setSleepMode(WIFI_LIGHT_SLEEP, 10);
 
   if (!(ads.begin())){
     Serial.println("Failed to initialize ADS.");
