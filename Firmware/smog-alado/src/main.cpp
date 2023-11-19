@@ -29,14 +29,16 @@ int buttonPress (int button);
 double thermistor = 500;
 double heaterTemperature = 0;
 double tempGoal = 180;
+double powerPercent = 0;
+
 double error = 0;
+double prevError = 0;
 double integral = 0;
 double proportional = 0;
-double lastError = 0;
 double derivative = 0;
+
 int power = 0;
-int preset = 1;
-double powerPercent = 0;
+int preset = 3;
 bool debouncedButton = false;
 bool state = false;
 uint16_t adcRaw = 1000;
@@ -46,9 +48,9 @@ double adcTimer = 0;
 double heaterTimer = 0;
 double loopTimer = 0;
 
-double kp = 1;  // Initial values, can be adjusted as needed
-double ki = 0.01;
-double kd = 1;
+double kp = 6.54;  // Initial values, can be adjusted as needed
+double ki = 0.83;
+double kd = 156.13;
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Adafruit_ADS1115 ads;
@@ -133,8 +135,8 @@ double resCalc (){
   resistor = (3.3 / (adcVoltage)) * pulldownResistor - pulldownResistor;
   if (resistor <50 )
     resistor = 50;
-  if (resistor > 20000)
-    resistor = 20000;
+  if (resistor > 120000)
+    resistor = 120000;
   return resistor;
 }
 
@@ -142,7 +144,7 @@ double steinhart (double termistor){
   //NTC 3950 100k
   /* const static double  a = 0.0008002314855002526;
   const static double  b = 0.0001989545566222665;
-  const static double  c = 1.7249962319615102e-7;*/
+  const static double  c = 1.7249962319615102e-7; */
 
   //NTC 3950 10k
   const static double  a = 0.0011260101763638105;
@@ -160,128 +162,108 @@ void autoTunePID() {
   const int tuningDuration = 1200000;  // 10 minutes in milliseconds
   unsigned long startTime = millis();
   double maxTemperature = 0;
-  double minTemperature = tempGoal;
+  double minTemperature = tempMax;
 
   // Variables for PID control
   double setpoint = tempGoal;
   double output;
-  double prevError = 0;
-  double integral = 0;
 
-  while ((millis() - startTime) < tuningDuration) {
-    thermistor = resCalc();
-    heaterTemperature = steinhart(thermistor);
+    while ((millis() - startTime) < tuningDuration) {
+      thermistor = resCalc();
+      heaterTemperature = steinhart(thermistor);
 
-    if (heaterTemperature > maxTemperature) {
-      maxTemperature = heaterTemperature;
-    }
-
-    if (heaterTemperature < minTemperature) {
-      minTemperature = heaterTemperature;
-    }
-	
-	// Check for button press to change preset
-    if (!digitalRead(buttonPin)) {
-      debouncedButton = buttonPress(buttonPin);
-      if (debouncedButton) {
-        preset++;
-        // End tuning if button is pressed
-        Serial.println("Exiting PID tuning");
-        return;
+      if (heaterTemperature > maxTemperature) {
+        maxTemperature = heaterTemperature;
       }
-    }
 
-    double error = setpoint - heaterTemperature;
-
-    // Calculate PID terms
-    double proportional = error;
-    integral += (error + prevError) / 2.0;  // Trapezoidal rule for integration
-    double derivative = error - prevError;
-
-    // Calculate PID output
-    output = kp * proportional + ki * integral + kd * derivative;
-
-    // Actuate the heater based on the PID output
-    if (output > 0) {
-      // Convert the PID output to a PWM value
-      int pwmValue = static_cast<int>(output);
-		  if (pwmValue > ANALOG_RANGE) pwmValue = ANALOG_RANGE;
-      if (heaterTemperature > (tempGoal + 5)) pwmValue = 0;
-      //if (error > 30) pwmValue = ANALOG_RANGE;
-	  Serial.print(">PID Power output: ");
-    Serial.println(pwmValue);
-      analogWrite(heater, pwmValue);
-    } else {
-      digitalWrite(heater, LOW);
-    }
-
-    // Save current values for the next iteration
-    prevError = error;
-
-    // Print for monitoring progress
-    Serial.print(">Proportional part: ");
-    Serial.println(kp * proportional);
-    Serial.print(">Integral part: ");
-    Serial.println(ki * integral);
-    Serial.print(">Derivative part: ");
-    Serial.println(kd * derivative);
-
-    Serial.print(">Thermistor resistence: ");
-    Serial.println(thermistor);
-    Serial.print(">Temperature reading: ");
-    Serial.println(heaterTemperature);
-    Serial.print(">Filtered ADC: ");
-    Serial.println(adcFiltered);
-    Serial.printf(">Temperature Goal: ");
-    Serial.println(tempGoal);
-
-    delay(1000);  // Adjust as needed based on your system's response time
-  }
-
-  // Calculate Ku and Pu for Ziegler-Nichols method
-  double Ku = 4 * (2 * tempGoal) / (maxTemperature - minTemperature);
-  double Pu = (millis() - startTime) / 1000.0 / (2 * 3.14);  // convert to seconds
-
-  // Use Ziegler-Nichols ultimate gain and oscillation period to set PID parameters
-  kp = 0.6 * Ku;
-  ki = 2 * kp / Pu;
-  kd = kp * Pu / 8;
-
-  Serial.println("Automatic PID tuning complete.");
-  Serial.print("kp: ");
-  Serial.println(kp);
-  Serial.print("ki: ");
-  Serial.println(ki);
-  Serial.print("kd: ");
-  Serial.println(kd);
+      if (heaterTemperature < minTemperature) {
+        minTemperature = heaterTemperature;
+      }
   
-  // Perform cooldown after tuning
-  Serial.println("Cooldown in progress...");
-  while (heaterTemperature > 35) {
-    thermistor = resCalc();
-    heaterTemperature = steinhart(thermistor);
-    Serial.print(">Proportional part: ");
-    Serial.println(kp * proportional);
-    Serial.print(">Integral part: ");
-    Serial.println(ki * integral);
-    Serial.print(">Derivative part: ");
-    Serial.println(kd * derivative);
-    Serial.print(">Thermistor resistence: ");
-    Serial.println(thermistor);
-    Serial.print(">Temperature reading: ");
-    Serial.println(heaterTemperature);
-    Serial.print(">Power output: ");
-    Serial.println(powerPercent);
-    Serial.printf(">Temperature Goal: ");
-    Serial.println(tempGoal);
-    digitalWrite(heater, LOW);  // Turn off the heater during cooldown
-    delay(1000);
-  }
+  	// Check for button press to change preset
+      if (!digitalRead(buttonPin)) {
+        debouncedButton = buttonPress(buttonPin);
+        if (debouncedButton) {
+          preset++;
+          // End tuning if button is pressed
+          Serial.println("Exiting PID tuning");
+          return;
+        }
+      }
+
+      double error = setpoint - heaterTemperature;
+
+      // Calculate PID terms
+      double proportional = error;
+      integral += (error + prevError) / 2.0;  // Trapezoidal rule for integration
+      double derivative = error - prevError;
+
+      if (integral > 832) integral = 832;
+      if (integral < -832) integral = -832;
+      if (derivative > ANALOG_RANGE) derivative = ANALOG_RANGE;
+      if (derivative < -ANALOG_RANGE) derivative = -ANALOG_RANGE;
+
+      // Calculate PID output
+      output = kp * proportional + ki * integral + kd * derivative;
+
+      // Actuate the heater based on the PID output
+      if (output > 0) {
+        // Convert the PID output to a PWM value
+        power = output;
+  		  if (power > ANALOG_RANGE) power = ANALOG_RANGE;
+        if (error > 25) power = ANALOG_RANGE;
+        analogWrite(heater, power);
+      } else {
+        digitalWrite(heater, LOW);
+      }
+
+      // Save current values for the next iteration
+      prevError = error;
+
+      // Print for monitoring progress
+      Serial.print(">Proportional part: ");
+      Serial.println(kp * proportional);
+      Serial.print(">Integral part: ");
+      Serial.println(ki * integral);
+      Serial.print(">Derivative part: ");
+      Serial.println(kd * derivative);
+
+      delay(1000);  // Adjust as needed based on your system's response time
+    }
+
+    // Calculate Ku and Pu for Ziegler-Nichols method
+    double Ku = 4 * (2 * tempGoal) / (maxTemperature - minTemperature);
+    double Pu = (millis() - startTime) / 1000.0 / (2 * 3.14);  // convert to seconds
+
+    // Use Ziegler-Nichols ultimate gain and oscillation period to set PID parameters
+    kp = (0.6 * Ku);
+    ki = (2 * kp / Pu);
+    kd = (kp * Pu / 8);
+
+    Serial.println("Automatic PID tuning complete.");
+    Serial.print("kp: ");
+    Serial.println(kp);
+    Serial.print("ki: ");
+    Serial.println(ki);
+    Serial.print("kd: ");
+    Serial.println(kd);
+
+    // Perform cooldown after tuning
+    Serial.println("Cooldown in progress...");
+    while (heaterTemperature > 35) {
+      thermistor = resCalc();
+      heaterTemperature = steinhart(thermistor);
+      Serial.print(">Thermistor resistance: ");
+      Serial.println(thermistor);
+      Serial.print(">Temperature reading: ");
+      Serial.println(heaterTemperature);
+      digitalWrite(heater, LOW);  // Turn off the heater during cooldown
+      delay(1000);
+    }
 
   // Now proceed to preset 3
-  preset = 1;
+  preset = 3;
 
-  // Print message and update display
   Serial.println("Cooldown complete. Proceeding to PID control.");
   updateDisplay();
 }
@@ -298,24 +280,24 @@ void runHeater(int preset) {
       autoTunePID();
       break;
     case 2: //open loop preheating at 40% power
-          if (heaterTemperature < 200)
-        power = 40*ANALOG_RANGE/100;
+          if (heaterTemperature < 120)
+        power = (40*ANALOG_RANGE)/ANALOG_RANGE;
       else
         power = 0;
       break;
     case 3: 
       if (heaterTemperature < tempMax){
-        if (error > 10)
-          power = 100*ANALOG_RANGE/100;
+        if (error > 25)
+          power = ANALOG_RANGE;
         else {
           // Calculate proportional, integral, and derivative terms
-          proportional = error * kp;
-          integral += error * ki;
-          derivative = (error - lastError) * kd;
-
+          proportional = error;
+          integral += (error + prevError) / 2.0;  // Trapezoidal rule for integration
+          derivative = error - prevError;
+          
           // Limit integral to prevent windup
-          if (integral > 80) integral = 80;
-          if (integral < -80) integral = -80;
+          if (integral > 832) integral = 832;
+          if (integral < -832) integral = -832;
 
           // Calculate power using PID terms
           power = kp * proportional + ki * integral + kd * derivative;
@@ -324,8 +306,7 @@ void runHeater(int preset) {
           if (power > ANALOG_RANGE) power = ANALOG_RANGE;
           if (power < 0) power = 0;
 
-          // Save the current error for the next iteration
-          lastError = error;
+          prevError = error;
         }
       } 
       break;
@@ -338,11 +319,11 @@ void runHeater(int preset) {
   else
     digitalWrite (heater, LOW);
   Serial.print(">Proportional part: ");
-  Serial.println(proportional);
+  Serial.println(proportional * kp);
   Serial.print(">Integral part: ");
-  Serial.println(integral);
+  Serial.println(integral * ki);
   Serial.print(">Derivative part: ");
-  Serial.println(derivative);
+  Serial.println(derivative * kd);
 }
 
 void updateDisplay() {
