@@ -33,6 +33,7 @@ char customWifiSSID[32];
 char customWifiPass[32];
 
 //Heater control
+double resistor = 0;
 double thermistor = 500;
 double heaterTemperature = 0;
 double tempGoal = 180;
@@ -63,6 +64,7 @@ double loopTimer = 0;
 
 // put function declarations here:
 void updateDisplay();
+void serialPrint();
 void autoTunePID();
 void runHeater (int preset);
 double resCalc ();
@@ -166,16 +168,17 @@ void setup() {
     for(;;);
   }
 
-  display.display();
-  delay(2000);
+  //display.display();
+  //delay(2000);
   display.clearDisplay();
-  display.drawPixel(10, 10, SSD1306_WHITE);
-  display.display();
-  delay(2000);
+  //display.display();
+  //delay(2000);
 }
 
 void loop() {
   ArduinoOTA.handle();
+  updateDisplay();
+  serialPrint();
   
   if ((millis()-adcTimer) > 200){
     adcTimer = millis();
@@ -200,23 +203,11 @@ void loop() {
     loopTimer=millis();
     digitalWrite(ledPin, state);
     state = !(state);
-    double powerPercent = 100*power/ANALOG_RANGE;
-    Serial.print(">Thermistor resistence: ");
-    Serial.println(thermistor);
-    Serial.print(">Temperature reading: ");
-    Serial.println(heaterTemperature);
-    Serial.print(">Power output: ");
-    Serial.println(powerPercent);
-    Serial.print(">Filtered ADC: ");
-    Serial.println(adcFiltered);
-    Serial.printf(">Temperature Goal: ");
-    Serial.println(tempGoal);
-    updateDisplay();
+    //double powerPercent = 100*power/ANALOG_RANGE;
   }
 }
 
 // put function definitions here:
-
 double resCalc (){
   int pulldownResistor = 1000;
   double resistor = 0;
@@ -250,6 +241,9 @@ double steinhart (double termistor){
 }
 
 void autoTunePID() {
+  ArduinoOTA.handle();
+  updateDisplay();
+  serialPrint();
   const int tuningDuration = 1200000;  // 10 minutes in milliseconds
   unsigned long startTime = millis();
   double maxTemperature = 0;
@@ -285,9 +279,9 @@ void autoTunePID() {
       double error = setpoint - heaterTemperature;
 
       // Calculate PID terms
-      double proportional = error;
+      proportional = error;
       integral += (error + prevError) / 2.0;  // Trapezoidal rule for integration
-      double derivative = error - prevError;
+      derivative = error - prevError;
 
       if (integral > 832) integral = 832;
       if (integral < -832) integral = -832;
@@ -310,14 +304,6 @@ void autoTunePID() {
 
       // Save current values for the next iteration
       prevError = error;
-
-      // Print for monitoring progress
-      Serial.print(">Proportional part: ");
-      Serial.println(kp * proportional);
-      Serial.print(">Integral part: ");
-      Serial.println(ki * integral);
-      Serial.print(">Derivative part: ");
-      Serial.println(kd * derivative);
 
       delay(1000);  // Adjust as needed based on your system's response time
     }
@@ -344,10 +330,6 @@ void autoTunePID() {
     while (heaterTemperature > 35) {
       thermistor = resCalc();
       heaterTemperature = steinhart(thermistor);
-      Serial.print(">Thermistor resistance: ");
-      Serial.println(thermistor);
-      Serial.print(">Temperature reading: ");
-      Serial.println(heaterTemperature);
       digitalWrite(heater, LOW);  // Turn off the heater during cooldown
       delay(1000);
     }
@@ -360,6 +342,9 @@ void autoTunePID() {
 }
 
 void runHeater(int preset) {
+  ArduinoOTA.handle();
+  updateDisplay();
+  serialPrint();
   power = 0;
   error = tempGoal - heaterTemperature;
   switch (preset){
@@ -409,6 +394,19 @@ void runHeater(int preset) {
     analogWrite (heater, power);
   else
     digitalWrite (heater, LOW);
+}
+
+void serialPrint() {
+  Serial.print(">Filtered ADC: ");
+  Serial.println(adcFiltered);
+  Serial.printf(">Temperature Goal: ");
+  Serial.println(tempGoal);
+  Serial.print(">Power output: ");
+  Serial.println(powerPercent);
+  Serial.print(">Thermistor resistance: ");
+  Serial.println(thermistor);
+  Serial.print(">Temperature reading: ");
+  Serial.println(heaterTemperature);
   Serial.print(">Proportional part: ");
   Serial.println(proportional * kp);
   Serial.print(">Integral part: ");
