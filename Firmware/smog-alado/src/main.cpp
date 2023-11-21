@@ -12,6 +12,7 @@
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>
+#include <logo.h>
 
 #define ledPin 2
 #define SDA 4
@@ -66,6 +67,7 @@ double loopTimer = 0;
 void updateDisplay();
 void serialPrint();
 void autoTunePID();
+void drawXbm(const uint8_t *xbm_data, int16_t width, int16_t height, int16_t x, int16_t y);
 void runHeater (int preset);
 double resCalc ();
 double steinhart (double termistor);
@@ -168,11 +170,10 @@ void setup() {
     for(;;);
   }
 
-  //display.display();
-  //delay(2000);
   display.clearDisplay();
-  //display.display();
-  //delay(2000);
+  drawXbm(logo_bits, _width, _height, 0, 0);
+  delay(10000);
+  display.clearDisplay();
 }
 
 void loop() {
@@ -454,4 +455,9 @@ int buttonPress(int button) {
     return 1;
   }
   return 0; 
+}
+
+void drawXbm(const uint8_t *xbm_data, int16_t width, int16_t height, int16_t x, int16_t y) {
+  display.drawXBitmap(x, y, xbm_data, width, height, SSD1306_WHITE);
+  display.display();
 }
