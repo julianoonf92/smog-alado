@@ -21,8 +21,7 @@
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
-#define OLED_RESET     -1
-#define SCREEN_ADDRESS 0x3D
+#define SCREEN_ADDRESS 0x3C
 
 #define tempMax 190
 #define ANALOG_RANGE 1024
@@ -71,7 +70,7 @@ double steinhart (double termistor);
 int buttonPress (int button);
 
 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 Adafruit_ADS1115 ads;
 
 void configModeCallback(WiFiManager *myWiFiManager) {
@@ -91,6 +90,7 @@ void setup() {
 
   // Set up WiFiManager
   WiFiManager wifiManager;
+  wifiManager.setTimeout(30);
   wifiManager.setAPCallback(configModeCallback);
 
   // Try to load WiFi credentials from EEPROM
@@ -138,6 +138,7 @@ void setup() {
 
   ArduinoOTA.onEnd([]() {
     Serial.println("\nEnd");
+    ESP.reset();
   });
 
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
@@ -418,20 +419,30 @@ void runHeater(int preset) {
 
 void updateDisplay() {
   display.clearDisplay();
-  display.setTextSize(1);
+  display.setTextSize(1); // Set text size to 2 (you can adjust the size as needed)
   display.setTextColor(SSD1306_WHITE);
 
   display.setCursor(0, 0);
-  display.print("Temp: ");
+  display.print("Temperature: ");
   display.print(heaterTemperature);
-  display.print("Goal: ");
-  display.print(tempGoal);
-  display.print(" ºC");
+  display.print((char)247);
+  display.print("C");
 
-  display.setCursor(0, 20);
+  display.setCursor(0, 16); // Adjust vertical position
+  display.print("Temp. Goal:  ");
+  display.print(tempGoal);
+  display.print((char)247);
+  display.print("C");
+
+  display.setCursor(0, 32); // Adjust vertical position
   display.print("PWM: ");
   display.print(powerPercent);
   display.print("%");
+
+  // Display the IP address
+  display.setCursor(0, 48); // Adjust vertical position
+  display.print("IP: ");
+  display.print(WiFi.localIP());
 
   display.display();
 }
