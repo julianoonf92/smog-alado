@@ -5,6 +5,7 @@
 #include <Adafruit_ADS1X15.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <logo.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <WiFiUdp.h>
@@ -12,7 +13,11 @@
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>
-#include <logo.h>
+#include <TelnetStream.h>
+#include <TimeLib.h>
+#include <sntp.h>
+#include <TZ.h>
+
 
 #define ledPin 2
 #define SDA 4
@@ -23,6 +28,8 @@
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define SCREEN_ADDRESS 0x3C
+
+#define TIME_ZONE TZ_America_Sao_Paulo
 
 #define tempMax 190
 #define ANALOG_RANGE 1024
@@ -67,6 +74,7 @@ double loopTimer = 0;
 void updateDisplay();
 void serialPrint();
 void autoTunePID();
+void TelnetPrint();
 void drawXbm(const uint8_t *xbm_data, int16_t width, int16_t height, int16_t x, int16_t y);
 void runHeater (int preset);
 double resCalc ();
@@ -170,6 +178,16 @@ void setup() {
     for(;;);
   }
 
+  configTime(TIME_ZONE, "pool.ntp.org");
+  time_t now = time(nullptr);
+  while (now < SECS_YR_2000) {
+    delay(100);
+    now = time(nullptr);
+  }
+  setTime(now);
+
+  TelnetStream.begin();
+
   display.clearDisplay();
   drawXbm(logo_bits, _width, _height, 0, 0);
   delay(10000);
@@ -245,6 +263,7 @@ void autoTunePID() {
   ArduinoOTA.handle();
   updateDisplay();
   serialPrint();
+  TelnetPrint();
   const int tuningDuration = 1200000;  // 10 minutes in milliseconds
   unsigned long startTime = millis();
   double maxTemperature = 0;
@@ -346,6 +365,7 @@ void runHeater(int preset) {
   ArduinoOTA.handle();
   updateDisplay();
   serialPrint();
+  TelnetPrint();
   power = 0;
   error = tempGoal - heaterTemperature;
   switch (preset){
@@ -444,6 +464,33 @@ void updateDisplay() {
   display.print(WiFi.localIP());
 
   display.display();
+}
+
+void TelnetPrint() {
+  static int i = 0;
+
+  char timeStr[20];
+  sprintf(timeStr, "%02d-%02d-%02d %02d:%02d:%02d", year(), month(), day(), hour(), minute(), second());
+
+  TelnetStream.print(i++);
+  TelnetStream.print(" ");
+  TelnetStream.print(timeStr);
+  TelnetStream.print(">Filtered ADC: ");
+  TelnetStream.println(adcFiltered);
+  TelnetStream.printf(">Temperature Goal: ");
+  TelnetStream.println(tempGoal);
+  TelnetStream.print(">Power output: ");
+  TelnetStream.println(powerPercent);
+  TelnetStream.print(">Thermistor resistance: ");
+  TelnetStream.println(thermistor);
+  TelnetStream.print(">Temperature reading: ");
+  TelnetStream.println(heaterTemperature);
+  TelnetStream.print(">Proportional part: ");
+  TelnetStream.println(proportional * kp);
+  TelnetStream.print(">Integral part: ");
+  TelnetStream.println(integral * ki);
+  TelnetStream.print(">Derivative part: ");
+  TelnetStream.println(derivative * kd);
 }
 
 int buttonPress(int button) {
